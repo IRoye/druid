@@ -90,7 +90,11 @@ public class DB2ExprParser extends SQLExprParser {
         } else if (lexer.identifierEquals(FnvHash.Constants.DAY) && expr instanceof SQLIntegerExpr) {
             lexer.nextToken();
             expr = new SQLIntervalExpr(expr, SQLIntervalUnit.DAY);
-        } else if (lexer.identifierEquals(FnvHash.Constants.TIMESTAMP)) {
+        } else if(lexer.identifierEquals(FnvHash.Constants.HOUR) && expr instanceof SQLIntegerExpr){
+            lexer.nextToken();
+            expr = new SQLIntervalExpr(expr, SQLIntervalUnit.HOUR);
+        }
+        else if (lexer.identifierEquals(FnvHash.Constants.TIMESTAMP)) {
             if (expr instanceof SQLIdentifierExpr) {
                 SQLIdentifierExpr identExpr = (SQLIdentifierExpr) expr;
                 if (identExpr.hashCode64() == FnvHash.Constants.CURRENT) {
