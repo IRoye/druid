@@ -289,6 +289,7 @@ public enum Token {
     MOD("MOD"),
     
     CONCAT("CONCAT"), // DB2
+    FINAL("FINAL"), // DB2
 
     UPSERT("UPSERT"), // Phoenix
 

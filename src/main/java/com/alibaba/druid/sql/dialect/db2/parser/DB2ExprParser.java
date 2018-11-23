@@ -31,8 +31,8 @@ public class DB2ExprParser extends SQLExprParser {
     public final static long[] AGGREGATE_FUNCTIONS_CODES;
 
     static {
-        String[] strings = { "AVG", "COUNT", "MAX", "MIN", "STDDEV", "SUM", "ROW_NUMBER",
-                "ROWNUMBER" };
+        String[] strings = {"AVG", "COUNT", "MAX", "MIN", "STDDEV", "SUM", "ROW_NUMBER",
+                "ROWNUMBER"};
         AGGREGATE_FUNCTIONS_CODES = FnvHash.fnv1a_64_lower(strings, true);
         AGGREGATE_FUNCTIONS = new String[AGGREGATE_FUNCTIONS_CODES.length];
         for (String str : strings) {
@@ -42,18 +42,18 @@ public class DB2ExprParser extends SQLExprParser {
         }
     }
 
-    public DB2ExprParser(String sql){
+    public DB2ExprParser(String sql) {
         this(new DB2Lexer(sql));
         this.lexer.nextToken();
         this.dbType = JdbcConstants.DB2;
     }
 
-    public DB2ExprParser(String sql, SQLParserFeature... features){
+    public DB2ExprParser(String sql, SQLParserFeature... features) {
         this(new DB2Lexer(sql, features));
         this.lexer.nextToken();
     }
 
-    public DB2ExprParser(Lexer lexer){
+    public DB2ExprParser(Lexer lexer) {
         super(lexer);
         this.aggregateFunctions = AGGREGATE_FUNCTIONS;
         this.aggregateFunctionHashCodes = AGGREGATE_FUNCTIONS_CODES;
@@ -90,11 +90,10 @@ public class DB2ExprParser extends SQLExprParser {
         } else if (lexer.identifierEquals(FnvHash.Constants.DAY) && expr instanceof SQLIntegerExpr) {
             lexer.nextToken();
             expr = new SQLIntervalExpr(expr, SQLIntervalUnit.DAY);
-        } else if(lexer.identifierEquals(FnvHash.Constants.HOUR) && expr instanceof SQLIntegerExpr){
+        } else if (lexer.identifierEquals(FnvHash.Constants.HOUR) && expr instanceof SQLIntegerExpr) {
             lexer.nextToken();
             expr = new SQLIntervalExpr(expr, SQLIntervalUnit.HOUR);
-        }
-        else if (lexer.identifierEquals(FnvHash.Constants.TIMESTAMP)) {
+        } else if (lexer.identifierEquals(FnvHash.Constants.TIMESTAMP)) {
             if (expr instanceof SQLIdentifierExpr) {
                 SQLIdentifierExpr identExpr = (SQLIdentifierExpr) expr;
                 if (identExpr.hashCode64() == FnvHash.Constants.CURRENT) {
