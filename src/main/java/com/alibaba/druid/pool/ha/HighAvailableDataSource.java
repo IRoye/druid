@@ -15,17 +15,6 @@
  */
 package com.alibaba.druid.pool.ha;
 
-import com.alibaba.druid.filter.Filter;
-import com.alibaba.druid.pool.DruidAbstractDataSource;
-import com.alibaba.druid.pool.DruidDataSource;
-import com.alibaba.druid.pool.WrapperAdapter;
-import com.alibaba.druid.pool.ha.selector.DataSourceSelector;
-import com.alibaba.druid.pool.ha.selector.DataSourceSelectorFactory;
-import com.alibaba.druid.pool.ha.selector.RandomDataSourceSelector;
-import com.alibaba.druid.support.logging.Log;
-import com.alibaba.druid.support.logging.LogFactory;
-
-import javax.sql.DataSource;
 import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -37,6 +26,18 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Logger;
+
+import javax.sql.DataSource;
+
+import com.alibaba.druid.filter.Filter;
+import com.alibaba.druid.pool.DruidAbstractDataSource;
+import com.alibaba.druid.pool.DruidDataSource;
+import com.alibaba.druid.pool.WrapperAdapter;
+import com.alibaba.druid.pool.ha.selector.DataSourceSelector;
+import com.alibaba.druid.pool.ha.selector.DataSourceSelectorFactory;
+import com.alibaba.druid.pool.ha.selector.RandomDataSourceSelector;
+import com.alibaba.druid.support.logging.Log;
+import com.alibaba.druid.support.logging.LogFactory;
 
 /**
  * DataSource class which contains multiple DataSource objects.
@@ -89,14 +90,26 @@ public class HighAvailableDataSource extends WrapperAdapter implements DataSourc
     private DataSourceSelector selector = new RandomDataSourceSelector(this);
     private String dataSourceFile = DEFAULT_DATA_SOURCE_FILE;
 
+    private boolean inited = false;
+
     public void init() throws SQLException {
+        if (inited) {
+            return;
+        }
         synchronized (this) {
+            if (inited) {
+                return;
+            }
             if (dataSourceMap == null || dataSourceMap.isEmpty()) {
                 dataSourceMap = new DataSourceCreator(dataSourceFile).createMap(this);
             }
             if (selector == null) {
                 selector = new RandomDataSourceSelector(this);
             }
+            if (dataSourceMap == null || dataSourceMap.isEmpty()) {
+                LOG.warn("There is NO DataSource available!!! Please check your configuration.");
+            }
+            inited = true;
         }
     }
 
@@ -117,7 +130,12 @@ public class HighAvailableDataSource extends WrapperAdapter implements DataSourc
 
     @Override
     public Connection getConnection() throws SQLException {
+        init();
         DataSource dataSource = selector.get();
+        if (dataSource == null) {
+            LOG.warn("Can NOT obtain DataSource, return null.");
+            return null;
+        }
         return dataSource.getConnection();
     }
 
@@ -145,12 +163,20 @@ public class HighAvailableDataSource extends WrapperAdapter implements DataSourc
         }
         DataSourceSelector selector = DataSourceSelectorFactory.getSelector(name, this);
         if (selector != null) {
-            this.selector = selector;
+            setDataSourceSelector(selector);
         }
     }
 
-    public DataSourceSelector getSelector() {
-        return selector;
+    public String getSelector() {
+        return selector == null ? null : selector.getName();
+    }
+
+    public DataSourceSelector getDataSourceSelector() {
+        return this.selector;
+    }
+
+    public void setDataSourceSelector(DataSourceSelector dataSourceSelector) {
+        this.selector = dataSourceSelector;
     }
 
     @Override

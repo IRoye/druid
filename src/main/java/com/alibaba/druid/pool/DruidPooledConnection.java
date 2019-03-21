@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Executor;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import javax.sql.ConnectionEvent;
@@ -70,13 +69,14 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
     private volatile     boolean               abandoned            = false;
     protected            StackTraceElement[]   connectStackTrace;
     protected            Throwable             disableError         = null;
-    public               ReentrantLock         lock                 = new ReentrantLock();
+    final                ReentrantLock         lock;
 
     public DruidPooledConnection(DruidConnectionHolder holder){
         super(holder.getConnection());
 
         this.conn = holder.getConnection();
         this.holder = holder;
+        this.lock = holder.lock;
         dupCloseLogEnable = holder.getDataSource().isDupCloseLogEnable();
         ownerThread = Thread.currentThread();
         connectedTimeMillis = System.currentTimeMillis();
@@ -1150,14 +1150,6 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
     }
     
     private void checkStateInternal() throws SQLException {
-        if (holder == null) {
-            if (disableError != null) {
-                throw new SQLException("connection holder is null", disableError);
-            } else {
-                throw new SQLException("connection holder is null");
-            }
-        }
-
         if (closed) {
             if (disableError != null) {
                 throw new SQLException("connection closed", disableError);
@@ -1171,6 +1163,14 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
                 throw new SQLException("connection disabled", disableError);
             } else {
                 throw new SQLException("connection disabled");
+            }
+        }
+
+        if (holder == null) {
+            if (disableError != null) {
+                throw new SQLException("connection holder is null", disableError);
+            } else {
+                throw new SQLException("connection holder is null");
             }
         }
     }

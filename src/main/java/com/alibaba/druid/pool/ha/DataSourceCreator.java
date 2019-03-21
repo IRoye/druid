@@ -15,11 +15,6 @@
  */
 package com.alibaba.druid.pool.ha;
 
-import com.alibaba.druid.pool.DruidDataSource;
-import com.alibaba.druid.support.logging.Log;
-import com.alibaba.druid.support.logging.LogFactory;
-
-import javax.sql.DataSource;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
@@ -31,6 +26,12 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+
+import javax.sql.DataSource;
+
+import com.alibaba.druid.pool.DruidDataSource;
+import com.alibaba.druid.support.logging.Log;
+import com.alibaba.druid.support.logging.LogFactory;
 
 /**
  * An utility class to create DruidDataSource dynamically.
@@ -72,7 +73,7 @@ public class DataSourceCreator {
                                          HighAvailableDataSource haDataSource) throws SQLException {
         DruidDataSource dataSource = new DruidDataSource();
 
-        dataSource.setName(name);
+        dataSource.setName(name + "-" + System.identityHashCode(dataSource));
         dataSource.setUrl(url);
         dataSource.setUsername(username);
         dataSource.setPassword(password);
@@ -122,8 +123,8 @@ public class DataSourceCreator {
     private void loadNameList() {
         Set<String> names = new HashSet<String>();
         for (String n : properties.stringPropertyNames()) {
-            if (n.contains(".")) {
-                names.add(n.split("\\.")[0]);
+            if (n.contains(".url")) {
+                names.add(n.split("\\.url")[0]);
             }
         }
         if (!names.isEmpty()) {

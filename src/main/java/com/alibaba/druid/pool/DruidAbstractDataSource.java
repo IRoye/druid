@@ -37,7 +37,10 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Logger;
@@ -61,7 +64,13 @@ import com.alibaba.druid.stat.JdbcSqlStat;
 import com.alibaba.druid.stat.JdbcStatManager;
 import com.alibaba.druid.support.logging.Log;
 import com.alibaba.druid.support.logging.LogFactory;
-import com.alibaba.druid.util.*;
+import com.alibaba.druid.util.DruidPasswordCallback;
+import com.alibaba.druid.util.Histogram;
+import com.alibaba.druid.util.JdbcConstants;
+import com.alibaba.druid.util.JdbcUtils;
+import com.alibaba.druid.util.MySqlUtils;
+import com.alibaba.druid.util.StringUtils;
+import com.alibaba.druid.util.Utils;
 
 /**
  * @author wenshao [szujobs@hotmail.com]
@@ -122,6 +131,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
     protected volatile int                             maxPoolPreparedStatementPerConnectionSize = 10;
 
     protected volatile boolean                         inited                                    = false;
+    protected volatile boolean                         initExceptionThrow                        = true;
 
     protected PrintWriter                              logWriter                                 = new PrintWriter(System.out);
 
@@ -144,6 +154,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
     protected volatile long                            minEvictableIdleTimeMillis                = DEFAULT_MIN_EVICTABLE_IDLE_TIME_MILLIS;
     protected volatile long                            maxEvictableIdleTimeMillis                = DEFAULT_MAX_EVICTABLE_IDLE_TIME_MILLIS;
     protected volatile long                            phyTimeoutMillis                          = DEFAULT_PHY_TIMEOUT_MILLIS;
+    protected volatile long                            phyMaxUseCount                            = -1;
 
     protected volatile boolean                         removeAbandoned;
     protected volatile long                            removeAbandonedTimeoutMillis              = 300 * 1000;
@@ -238,12 +249,14 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
     protected volatile int                             directCreateCount                         = 0;
     protected volatile long                            createCount                               = 0L;
     protected volatile long                            destroyCount                              = 0L;
+    protected volatile long                            createStartNanos                          = 0L;
 
     final static AtomicIntegerFieldUpdater<DruidAbstractDataSource> createErrorCountUpdater      = AtomicIntegerFieldUpdater.newUpdater(DruidAbstractDataSource.class, "createErrorCount");
     final static AtomicIntegerFieldUpdater<DruidAbstractDataSource> creatingCountUpdater         = AtomicIntegerFieldUpdater.newUpdater(DruidAbstractDataSource.class, "creatingCount");
     final static AtomicIntegerFieldUpdater<DruidAbstractDataSource> directCreateCountUpdater     = AtomicIntegerFieldUpdater.newUpdater(DruidAbstractDataSource.class, "directCreateCount");
     final static AtomicLongFieldUpdater<DruidAbstractDataSource>    createCountUpdater           = AtomicLongFieldUpdater.newUpdater(DruidAbstractDataSource.class, "createCount");
     final static AtomicLongFieldUpdater<DruidAbstractDataSource>    destroyCountUpdater          = AtomicLongFieldUpdater.newUpdater(DruidAbstractDataSource.class, "destroyCount");
+    final static AtomicLongFieldUpdater<DruidAbstractDataSource> createStartNanosUpdater         = AtomicLongFieldUpdater.newUpdater(DruidAbstractDataSource.class, "createStartNanos");
 
     private Boolean                                    useUnfairLock                             = null;
     private boolean                                    useLocalSessionState                      = true;
@@ -254,9 +267,13 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
     private boolean                                    asyncCloseConnectionEnable                = false;
     protected int                                      maxCreateTaskCount                        = 3;
     protected boolean                                  failFast                                  = false;
-    protected AtomicBoolean                            failContinuous                            = new AtomicBoolean(false);
+    protected volatile int                             failContinuous                            = 0;
+    protected volatile long                            failContinuousTimeMillis                  = 0L;
     protected ScheduledExecutorService                 destroyScheduler;
     protected ScheduledExecutorService                 createScheduler;
+
+    final static AtomicLongFieldUpdater<DruidAbstractDataSource> failContinuousTimeMillisUpdater = AtomicLongFieldUpdater.newUpdater(DruidAbstractDataSource.class, "failContinuousTimeMillis");
+    final static AtomicIntegerFieldUpdater<DruidAbstractDataSource> failContinuousUpdater        = AtomicIntegerFieldUpdater.newUpdater(DruidAbstractDataSource.class, "failContinuous");
 
     protected boolean                                  initVariants                              = false;
     protected boolean                                  initGlobalVariants                        = false;
@@ -776,6 +793,14 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
 
     public void setPhyTimeoutMillis(long phyTimeoutMillis) {
         this.phyTimeoutMillis = phyTimeoutMillis;
+    }
+
+    public long getPhyMaxUseCount() {
+        return phyMaxUseCount;
+    }
+
+    public void setPhyMaxUseCount(long phyMaxUseCount) {
+        this.phyMaxUseCount = phyMaxUseCount;
     }
 
     public int getNumTestsPerEvictionRun() {
@@ -1618,6 +1643,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
                 ? new HashMap<String, Object>()
                 : null;
 
+        createStartNanosUpdater.set(this, connectStartNanos);
         creatingCountUpdater.incrementAndGet(this);
         try {
             conn = createPhysicalConnection(url, physicalConnectProperties);
@@ -1681,9 +1707,34 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
             lock.unlock();
         }
     }
-    
+
+    public boolean isFailContinuous() {
+        return failContinuousUpdater.get(this) == 1;
+    }
+
     protected void setFailContinuous(boolean fail) {
-        failContinuous.set(fail);
+        if (fail) {
+            failContinuousTimeMillisUpdater.set(this, System.currentTimeMillis());
+        } else {
+            failContinuousTimeMillisUpdater.set(this, 0L);
+        }
+
+        boolean currentState = failContinuousUpdater.get(this) == 1;
+        if (currentState == fail) {
+            return;
+        }
+
+        if (fail) {
+            failContinuousUpdater.set(this, 1);
+            if (LOG.isInfoEnabled()) {
+                LOG.info("{dataSource-" + this.getID() + "} failContinuous is true");
+            }
+        } else {
+            failContinuousUpdater.set(this, 0);
+            if (LOG.isInfoEnabled()) {
+                LOG.info("{dataSource-" + this.getID() + "} failContinuous is false");
+            }
+        }
     }
 
     public void initPhysicalConnection(Connection conn) throws SQLException {
@@ -2024,6 +2075,20 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
 
     public boolean isOnFatalError() {
         return onFatalError;
+    }
+
+    /**
+     * @since 1.1.11
+     */
+    public boolean isInitExceptionThrow() {
+        return initExceptionThrow;
+    }
+
+    /**
+     * @since 1.1.11
+     */
+    public void setInitExceptionThrow(boolean initExceptionThrow) {
+        this.initExceptionThrow = initExceptionThrow;
     }
 
     public static class PhysicalConnectionInfo {

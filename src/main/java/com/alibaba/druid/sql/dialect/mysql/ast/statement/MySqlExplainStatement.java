@@ -19,8 +19,6 @@ import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.SQLExpr;
 import com.alibaba.druid.sql.ast.SQLName;
 import com.alibaba.druid.sql.ast.statement.SQLExplainStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.clause.MySqlExplainType;
-import com.alibaba.druid.sql.dialect.mysql.ast.clause.MySqlFormatName;
 import com.alibaba.druid.sql.dialect.mysql.visitor.MySqlASTVisitor;
 import com.alibaba.druid.sql.visitor.SQLASTVisitor;
 import com.alibaba.druid.util.JdbcConstants;
@@ -36,6 +34,12 @@ public class MySqlExplainStatement extends SQLExplainStatement implements MySqlS
     public MySqlExplainStatement() {
         super (JdbcConstants.MYSQL);
     }
+
+       public MySqlExplainStatement(String dbType) {
+        super (dbType);
+    }
+
+
     @Override
     public void accept0(MySqlASTVisitor visitor) {
         if (visitor.visit(this)) {
